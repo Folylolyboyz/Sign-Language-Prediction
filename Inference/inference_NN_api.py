@@ -1,0 +1,161 @@
+import os
+
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from math import ceil
+import pandas as pd
+
+import sys
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(root_dir)
+from Create.draw_landmarks import draw_landmarks
+
+import onnxruntime as rt
+
+from fastapi import FastAPI,WebSocket
+import uvicorn
+
+from collections import Counter
+
+app = FastAPI()
+
+mp_hands = mp.solutions.hands
+
+mp_draw = mp.solutions.drawing_utils
+hands = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.8, max_num_hands=1)
+hands_ratio = mp_hands.Hands(min_detection_confidence=0.8, min_tracking_confidence=0.8, max_num_hands=1)
+
+def cam_setup(width=1280, height=720) -> cv2.VideoCapture:
+    cam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    return cam
+
+def cut_out_ratio_maintained(frame: np.ndarray, data_x, data_y):
+    #Standardize or normalize whatever the image on size 400x400 while maintaining ratio
+        
+    #Cut out to basically take out a box of my hand
+    x, y, _ = frame.shape
+    cutout_padding = 25
+    min_x = int(min(data_x))
+    max_x = int(max(data_x))
+    min_y = int(min(data_y))
+    max_y = int(max(data_y))
+    
+    padded_x_min, padded_x_max =  max(min_x-cutout_padding, 0), min(max_x+cutout_padding, y)
+    padded_y_min, padded_y_max =  max(min_y-cutout_padding, 0), min(max_y+cutout_padding, x)
+    cropped_frame = frame[padded_y_min:padded_y_max, padded_x_min:padded_x_max]
+    
+    resize_size = 400
+    
+    x, y, _ = cropped_frame.shape
+    
+    white_frame = np.ones((resize_size, resize_size, 3), np.uint8)*255
+    
+    try:
+        if x > y:
+            y_cal = ceil(y * resize_size/x)
+            resized_frame = cv2.resize(cropped_frame, (y_cal, resize_size))
+            padding = (400 - y_cal)//2
+            white_frame[:, padding:y_cal+padding] = resized_frame
+        else:
+            x_cal = ceil(x * resize_size/y)
+            resized_frame = cv2.resize(cropped_frame, (resize_size, x_cal))
+            
+            padding = (400 - x_cal)//2
+            white_frame[padding:x_cal+padding, :] = resized_frame
+    except:
+        pass
+    
+    return white_frame
+
+def get_frame(data):
+    image_np = np.frombuffer(data, np.uint8)
+    frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    # frame = cv2.imread(data)
+    frame = cv2.flip(frame, 1)
+    frame_draw = frame.copy()
+    data_x, data_y = draw_landmarks(frame_draw, hands)
+    # print(data_x)
+    if data_x and data_y:
+        draw_ratio_maintained_frame = cut_out_ratio_maintained(frame, data_x, data_y)
+        data_x_ratio, data_y_ratio = draw_landmarks(draw_ratio_maintained_frame, hands_ratio)
+    
+        return data_x_ratio, data_y_ratio
+    return False, False
+
+
+
+def start_cam(data):
+    data_x_ratio, data_y_ratio = get_frame(data)
+    try:
+        if data_x_ratio and data_y_ratio:
+            data = []
+            data_x_ratio = list(map(lambda x: x/400, data_x_ratio))
+            data_y_ratio = list(map(lambda x: x/400, data_y_ratio))
+            data.append(data_x_ratio+data_y_ratio)
+            # print(data)
+            columns = [f"x{i}" for i in range(1, 22)] + [f"y{i}" for i in range(1, 22)]
+            df = pd.DataFrame(data, columns=columns)
+            
+            label = "ABCDEFGHIKLMNOPQRSTUVWXY"
+            d = {i:j for i,j in enumerate(label)}
+            
+            sess = rt.InferenceSession("Train/asl_ensemble_model.onnx", providers=["CPUExecutionProvider"])
+            input_name = sess.get_inputs()[0].name
+            label_name = sess.get_outputs()[0].name
+            hand_sign = df.values.astype(np.float32)
+            
+            prediction = sess.run([label_name], {input_name: hand_sign})
+            predicted_label = np.argmax(prediction)
+            predicted_label = d[predicted_label]
+            # print(predicted_label)
+            return predicted_label
+        return " "
+            
+    except Exception as E:
+        print(f"Error: {E}")
+        # return "Error"
+        return " "
+
+
+@app.get("/")
+def hello_world():
+    return "Hello World"
+
+@app.websocket("/predict")
+async def predict(websocket: WebSocket):
+    await websocket.accept()
+    print("WebSocket connected!")
+
+    while True:
+        try:
+            pred = []
+            for i in range(30):
+                data = await websocket.receive_bytes()
+                prediction_label = start_cam(data)
+                pred.append(prediction_label)
+            
+            prediction_label = Counter(pred).most_common(1)[0][0]
+            # image_np = np.frombuffer(data, np.uint8)
+            # frame = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+            
+            await websocket.send_text(f"{prediction_label}")
+            
+            for i in range(15):
+                data = await websocket.receive_bytes()
+                prediction_label = start_cam(data)
+                pred.append(prediction_label)
+            # if frame is not None:
+            #     cv2.imshow("WebP Stream", frame)
+            #     if cv2.waitKey(1) & 0xFF == ord('q'):
+            #         break
+
+        except Exception as e:
+            print(f"Error: {e}")
+            break
+
+uvicorn.run(app, host="0.0.0.0", port=8000)
