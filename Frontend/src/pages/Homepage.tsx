@@ -58,7 +58,7 @@ export default function Homepage() {
                         handDetection={handleHandDetection}
                         updatePrediction={handleDetectedWord}
                         pauseDetected={pauseDetected}
-                        socketUrl={"ws://signws.softvowels.com/predict"}
+                        socketUrl={"wss://signws.softvowels.com/predict"}
                     />
                 </div>
                 <div className="flex-1 mb-4 w-full flex flex-col justify-between items-center bg-white/90 border-1 p-2 sm:p-4 rounded-2xl">
