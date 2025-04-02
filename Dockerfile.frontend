@@ -12,4 +12,4 @@ RUN npm install
 EXPOSE 5173
 
 # Run backend and build frontend together
-CMD ["npm", "start"]
+CMD sh -c "cd /app/Frontend && npm run dev"
