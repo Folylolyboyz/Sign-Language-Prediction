@@ -3,7 +3,7 @@ FROM python:3.8.10-slim as backend
 # Set the working directory
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements_server.txt .
 RUN pip install -r requirements_server.txt
 
 # Copy the entire project
