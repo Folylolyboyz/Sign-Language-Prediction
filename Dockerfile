@@ -9,4 +9,4 @@ COPY . .
 # Install Python dependencies
 RUN pip install -r requirements_server.txt
 
-CMD sh -c "cd /app && python Inference/inference_api.py"
+CMD sh -c "cd /app && python Inference/inference_NN_api.py"
