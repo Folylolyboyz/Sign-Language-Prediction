@@ -132,7 +132,7 @@ async def predict(websocket: WebSocket):
     while True:
         try:
             pred = []
-            for i in range(30):
+            for i in range(20):
                 data = await websocket.receive_bytes()
                 prediction_label = start_cam(data)
                 pred.append(prediction_label)
