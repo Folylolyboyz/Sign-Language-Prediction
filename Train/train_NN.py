@@ -21,13 +21,14 @@ d = {j: i for i, j in enumerate(labels)}
 df_clean["label"] = df_clean["label"].map(d)
 
 X = df_clean.drop(columns=["label"])
-y = pd.get_dummies(df_clean["label"]).values  # One-hot encoding
+y = df_clean["label"].values  # One-hot encoding
 
 
 X_train, X_test, y_train, y_test = train_test_split(X.values, y, test_size=0.2, random_state=42)
 
 input_shape = (X.shape[1],)
-num_classes = y.shape[1]
+# num_classes = y.shape[1]
+num_classes = len(np.unique(y))
 
 import tensorflow as tf
 from tensorflow import keras
@@ -90,7 +91,7 @@ def build_optimized_model():
     outputs = layers.Dense(24, activation='softmax')(x)
 
     model = Model(inputs, outputs)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
@@ -122,7 +123,7 @@ y_pred_labels = [inverse_d[i] for i in y_pred_classes]
 #     print(f"Sample {i+1}: Predicted Label - {label}")
 
 # Generate confusion matrix
-true_classes = np.argmax(y_test, axis=1)
+true_classes = y_test
 cm = confusion_matrix(true_classes, y_pred_classes)
 plt.figure(figsize=(10, 8))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
